@@ -139,9 +139,12 @@ InferenceProcess::InferenceProcess(uint8_t *_tensorArena, size_t _tensorArenaSiz
 
 bool InferenceProcess::runJob(InferenceJob &job) {
     bool ret;
+//    PRINTF("I Run Here in runjob\r\n");
     if (job.isEthosuOp) {
+//    PRINTF("I Run Here in isEthosuOp\r\n");
         ret = runEthosuOp(job);
     } else {
+//    PRINTF("I Run Here in runmodel\r\n");
 	ret = runModel(job);
     }
     return ret;
@@ -188,6 +191,8 @@ bool InferenceProcess::runEthosuOp(InferenceJob &job) {
     }
 
     job.ethosuMonitor.configure(job.ethosuDriver, job.pmuEventConfig);
+
+//    PRINTF("I Run Here in runEthosuOp1\r\n");
     if (job.output.size() == 1) {
         auto qread_buffer = reinterpret_cast<EthosuQreadEvent*>(job.output[0].data);
         size_t buffer_size = job.output[0].size / sizeof(EthosuQreadEvent);
@@ -222,6 +227,8 @@ bool InferenceProcess::runEthosuOp(InferenceJob &job) {
         }
     }
     job.ethosuMonitor.monitorSample(job.ethosuDriver);
+
+ //   PRINTF("I Run Here in runEthosuOp2\r\n");
     ethosu_release_driver(drv);
 
     LOG_INFO("Finished running job: %s", job.name.c_str());
@@ -239,6 +246,7 @@ bool InferenceProcess::runModel(InferenceJob &job) {
                 TFLITE_SCHEMA_VERSION);
         return true;
     }
+//    PRINTF("I Run Here in runmodel1\r\n");
 
     // Create the TFL micro interpreter
     tflite::MicroMutableOpResolver<3> resolver;
@@ -246,20 +254,26 @@ bool InferenceProcess::runModel(InferenceJob &job) {
         model, resolver, tensorArena, tensorArenaSize);
 
     resolver.AddEthosU();
+//    PRINTF("I Run Here in runmodel2\r\n");
     resolver.AddDetectionPostprocess();
     resolver.AddDequantize();
+//    PRINTF("I Run Here in runmodel3\r\n");
 
     // Set external context
     if (job.externalContext != nullptr) {
         interpreter.SetMicroExternalContext(job.externalContext);
     }
+//    PRINTF("I Run Here in runmodel4\r\n");
 
     // Allocate tensors
     TfLiteStatus status = interpreter.AllocateTensors();
+//    PRINTF("I Run Here in runmodel4.5\r\n");
     if (status != kTfLiteOk) {
+//        PRINTF("I Run Here in runmodel5\r\n");
         LOG_ERR("Failed to allocate tensors for inference: job=%s", job.name.c_str());
         return true;
     }
+//    PRINTF("I Run Here in runmodel5\r\n");
 
     job.ethosuMonitor.configure(job.ethosuDriver, job.pmuEventConfig);
     if (job.input.size() > 0) { // Copy by A-core when ifm is empty
@@ -268,6 +282,7 @@ bool InferenceProcess::runModel(InferenceJob &job) {
             return true;
         }
     }
+//    PRINTF("I Run Here in runmodel6\r\n");
 
     // Get the current cycle counter value
     uint32_t cpuCyclesBegin = tflite::GetCurrentTimeTicks();
@@ -277,12 +292,15 @@ bool InferenceProcess::runModel(InferenceJob &job) {
 
     // Calculate nbr of CPU cycles for the Invoke call
     job.cpuCycles = tflite::GetCurrentTimeTicks() - cpuCyclesBegin;
+//   PRINTF("I Run Here in runmodel7\r\n");
 
     if (status != kTfLiteOk) {
         LOG_ERR("Invoke failed for inference: job=%s", job.name.c_str());
+//    PRINTF("I Run Here in runmodel8\r\n");
         return true;
     }
 
+//    PRINTF("I Run Here in runmodel9\r\n");
     if (job.output.size() > 0) {// Copy by A-core when ofm is empty
         // Copy output data from TFLu arena to job descriptor
         if (copyOfm(job, interpreter)) {

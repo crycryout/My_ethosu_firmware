@@ -23,7 +23,7 @@ limitations under the License.
 #include "tensorflow/lite/micro/micro_log.h"
 #include "tensorflow/lite/micro/micro_profiler.h"
 #include "tensorflow/lite/schema/schema_generated.h"
-
+#include "fsl_debug_console.h"
 namespace tflite {
 namespace {
 
@@ -88,6 +88,7 @@ TfLiteStatus MicroInterpreterGraph::InitSubgraphs() {
 TfLiteStatus MicroInterpreterGraph::PrepareSubgraphs() {
   int previous_subgraph_idx = current_subgraph_index_;
 
+  //PRINTF("I Run Here in PrepareSubgraphs1\r\n");
   for (size_t subgraph_idx = 0; subgraph_idx < subgraphs_->size();
        subgraph_idx++) {
     current_subgraph_index_ = subgraph_idx;
@@ -98,19 +99,30 @@ TfLiteStatus MicroInterpreterGraph::PrepareSubgraphs() {
       const TFLMRegistration* registration = subgraph_allocations_[subgraph_idx]
                                                  .node_and_registrations[i]
                                                  .registration;
+  //PRINTF("I Run Here in PrepareSubgraphs2\r\n");
+  PRINTF("%d\r\n",registration->prepare);
       if (registration->prepare != nullptr) {
+  //PRINTF("I Run Here in PrepareSubgraphs2.1\r\n");
+  PRINTF("准备执行 op: %s, 函数指针: %p\r\n", OpNameFromRegistration(registration), registration->prepare);
+
         TfLiteStatus prepare_status = registration->prepare(context_, node);
+  //PRINTF("%d\r\n",prepare_status);
+  //PRINTF("I Run Here in PrepareSubgraphs2.2\r\n");
         if (prepare_status != kTfLiteOk) {
+  //PRINTF("I Run Here in PrepareSubgraphs2.3\r\n");
           MicroPrintf("Node %s (number %df) failed to prepare with status %d",
                       OpNameFromRegistration(registration), i, prepare_status);
+  //PRINTF("I Run Here in PrepareSubgraphs2.5\r\n");
           return kTfLiteError;
         }
       }
+  //PRINTF("I Run Here in PrepareSubgraphs3\r\n");
       allocator_->FinishPrepareNodeAllocations(/*node_id=*/i);
     }
   }
   current_subgraph_index_ = previous_subgraph_idx;
 
+  //PRINTF("I Run Here in PrepareSubgraphs4\r\n");
   return kTfLiteOk;
 }
 

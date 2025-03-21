@@ -35,6 +35,7 @@ limitations under the License.
 #include "tensorflow/lite/micro/micro_log.h"
 #include "tensorflow/lite/micro/tflite_bridge/flatbuffer_conversions_bridge.h"
 #include "tensorflow/lite/schema/schema_generated.h"
+#include "fsl_debug_console.h"
 
 namespace tflite {
 
@@ -212,125 +213,114 @@ void* GetFlatbufferTensorBuffer(
   }
   return out_buffer;
 }
-
 TfLiteStatus InitializeTfLiteTensorFromFlatbuffer(
-    IPersistentBufferAllocator* persistent_buffer_allocator,
-    INonPersistentBufferAllocator* non_persistent_buffer_allocator,
-    bool allocate_temp, const tflite::Tensor& flatbuffer_tensor,
-    const flatbuffers::Vector<flatbuffers::Offset<Buffer>>* buffers,
-    TfLiteTensor* result) {
-  TFLITE_DCHECK(result != nullptr);
+  IPersistentBufferAllocator* persistent_buffer_allocator,
+  INonPersistentBufferAllocator* non_persistent_buffer_allocator,
+  bool allocate_temp, const tflite::Tensor& flatbuffer_tensor,
+  const flatbuffers::Vector<flatbuffers::Offset<Buffer>>* buffers,
+  TfLiteTensor* result) {
+PRINTF("Entering InitializeTfLiteTensorFromFlatbuffer\r\n");
+TFLITE_DCHECK(result != nullptr);
 
-  *result = {};
-  // Make sure the serialized type is one we know how to deal with, and convert
-  // it from a flatbuffer enum into a constant used by the kernel C API.
-  TF_LITE_ENSURE_STATUS(
-      tflite::ConvertTensorType(flatbuffer_tensor.type(), &result->type));
-  // Make sure we remember if the serialized tensor is designated as a variable.
-  result->is_variable = flatbuffer_tensor.is_variable();
+*result = {};
+PRINTF("Converting tensor type...\r\n");
+TF_LITE_ENSURE_STATUS(
+    tflite::ConvertTensorType(flatbuffer_tensor.type(), &result->type));
 
-  result->data.data = GetFlatbufferTensorBuffer(flatbuffer_tensor, buffers);
+PRINTF("Setting is_variable flag...\r\n");
+result->is_variable = flatbuffer_tensor.is_variable();
 
-  // TODO(petewarden): Some of these paths aren't getting enough testing
-  // coverage, so we should figure out some tests that exercise them.
-  if (result->data.data == nullptr) {
-    // The tensor contents haven't been set from a serialized buffer, so
-    // make a note that they will be allocated from memory. The actual
-    // allocation won't happen until later.
-    result->allocation_type = kTfLiteArenaRw;
-  } else {
-    // We set the data from a serialized buffer, so record tha.
-    result->allocation_type = kTfLiteMmapRo;
+PRINTF("Getting tensor buffer from flatbuffer...\r\n");
+result->data.data = GetFlatbufferTensorBuffer(flatbuffer_tensor, buffers);
+if (result->data.data == nullptr) {
+  PRINTF("Tensor buffer is nullptr, setting allocation type to kTfLiteArenaRw\r\n");
+  result->allocation_type = kTfLiteArenaRw;
+} else {
+  PRINTF("Tensor buffer is valid, setting allocation type to kTfLiteMmapRo\r\n");
+  result->allocation_type = kTfLiteMmapRo;
+}
+
+size_t type_size;
+PRINTF("Calculating bytes required for tensor...\r\n");
+TF_LITE_ENSURE_STATUS(
+    BytesRequiredForTensor(flatbuffer_tensor, &result->bytes, &type_size));
+PRINTF("Bytes required: %d, type_size: %d\r\n", result->bytes, type_size);
+
+if (flatbuffer_tensor.shape() == nullptr) {
+  PRINTF("Tensor shape is nullptr, using kZeroLengthIntArray\r\n");
+  result->dims = const_cast<TfLiteIntArray*>(&kZeroLengthIntArray);
+} else {
+  PRINTF("Converting flatbuffer tensor shape to TfLiteIntArray...\r\n");
+  result->dims = FlatBufferVectorToTfLiteTypeArray(flatbuffer_tensor.shape());
+}
+
+// Copy quantization information from the flatbuffer.
+const auto* src_quantization = flatbuffer_tensor.quantization();
+if (src_quantization && src_quantization->scale() &&
+    (src_quantization->scale()->size() > 0) &&
+    src_quantization->zero_point() &&
+    (src_quantization->zero_point()->size() > 0)) {
+  PRINTF("Copying quantization information...\r\n");
+  result->params.scale = src_quantization->scale()->Get(0);
+  result->params.zero_point =
+      static_cast<int32_t>(src_quantization->zero_point()->Get(0));
+
+  int channels = src_quantization->scale()->size();
+  PRINTF("Quantization channels: %d\r\n", channels);
+  TfLiteAffineQuantization* quantization =
+      allocate_temp
+          ? reinterpret_cast<TfLiteAffineQuantization*>(
+                non_persistent_buffer_allocator->AllocateTemp(
+                    sizeof(TfLiteAffineQuantization),
+                    alignof(TfLiteAffineQuantization)))
+          : reinterpret_cast<TfLiteAffineQuantization*>(
+                persistent_buffer_allocator->AllocatePersistentBuffer(
+                    sizeof(TfLiteAffineQuantization),
+                    alignof(TfLiteAffineQuantization)));
+  if (quantization == nullptr) {
+    MicroPrintf("Unable to allocate TfLiteAffineQuantization.\r\n");
+    return kTfLiteError;
   }
+  PRINTF("Allocated TfLiteAffineQuantization: %p\r\n", quantization);
 
-  // Figure out what the size in bytes of the buffer is and store it.
-  size_t type_size;
-  TF_LITE_ENSURE_STATUS(
-      BytesRequiredForTensor(flatbuffer_tensor, &result->bytes, &type_size));
-
-  if (flatbuffer_tensor.shape() == nullptr) {
-    // flatbuffer_tensor.shape() can return a nullptr in the case of a scalar
-    // tensor.
-    // TODO(b/188459715): figure out why const_cast is required here.
-    result->dims = const_cast<TfLiteIntArray*>(&kZeroLengthIntArray);
-  } else {
-    // TFLM doesn't allow reshaping the tensor which requires dynamic memory
-    // allocation so it is safe to drop the const qualifier. In the future, if
-    // we really want to update the tensor shape, we can always pass in a new
-    // TfLiteIntArray - especially we have to do so if the dimension is
-    result->dims = FlatBufferVectorToTfLiteTypeArray(flatbuffer_tensor.shape());
+  PRINTF("Allocating memory for quantization->zero_point...\r\n");
+  quantization->zero_point =
+      allocate_temp
+          ? reinterpret_cast<TfLiteIntArray*>(
+                non_persistent_buffer_allocator->AllocateTemp(
+                    TfLiteIntArrayGetSizeInBytes(channels),
+                    alignof(TfLiteIntArray)))
+          : reinterpret_cast<TfLiteIntArray*>(
+                persistent_buffer_allocator->AllocatePersistentBuffer(
+                    TfLiteIntArrayGetSizeInBytes(channels),
+                    alignof(TfLiteIntArray)));
+  if (quantization->zero_point == nullptr) {
+    MicroPrintf("Unable to allocate quantization->zero_point.\r\n");
+    return kTfLiteError;
   }
+  PRINTF("Allocated quantization->zero_point: %p\r\n", quantization->zero_point);
 
-  // Copy the quantization information from the serialized data.
-  const auto* src_quantization = flatbuffer_tensor.quantization();
-  if (src_quantization && src_quantization->scale() &&
-      (src_quantization->scale()->size() > 0) &&
-      src_quantization->zero_point() &&
-      (src_quantization->zero_point()->size() > 0)) {
-    // Always populate the TfLiteTensor.params field, even if there are
-    // per-channel quantization parameters.
-    result->params.scale = src_quantization->scale()->Get(0);
-    // Note that the zero_point field in the FlatBuffers schema is a 64-bit
-    // integer, but the zero_point field in the TfLiteQuantizationParams struct
-    // is a 32-bit integer.
-    result->params.zero_point =
-        static_cast<int32_t>(src_quantization->zero_point()->Get(0));
+  quantization->scale =
+      FlatBufferVectorToTfLiteTypeArray(src_quantization->scale());
 
-    // Populate per-channel quantization params.
-    int channels = src_quantization->scale()->size();
-    TfLiteAffineQuantization* quantization =
-        allocate_temp
-            ? reinterpret_cast<TfLiteAffineQuantization*>(
-                  non_persistent_buffer_allocator->AllocateTemp(
-                      sizeof(TfLiteAffineQuantization),
-                      alignof(TfLiteAffineQuantization)))
-            : reinterpret_cast<TfLiteAffineQuantization*>(
-                  persistent_buffer_allocator->AllocatePersistentBuffer(
-                      sizeof(TfLiteAffineQuantization),
-                      alignof(TfLiteAffineQuantization)));
-    if (quantization == nullptr) {
-      MicroPrintf("Unable to allocate TfLiteAffineQuantization.\n");
-      return kTfLiteError;
-    }
-
-    // TODO(b/153688719): Reduce tail allocation by using a global zero-point
-    // buffer. This value can not be reused from the flatbuffer since the
-    // zero_point is stored as a int64_t.
-    quantization->zero_point =
-        allocate_temp
-            ? reinterpret_cast<TfLiteIntArray*>(
-                  non_persistent_buffer_allocator->AllocateTemp(
-                      TfLiteIntArrayGetSizeInBytes(channels),
-                      alignof(TfLiteIntArray)))
-            : reinterpret_cast<TfLiteIntArray*>(
-                  persistent_buffer_allocator->AllocatePersistentBuffer(
-                      TfLiteIntArrayGetSizeInBytes(channels),
-                      alignof(TfLiteIntArray)));
-    if (quantization->zero_point == nullptr) {
-      MicroPrintf("Unable to allocate quantization->zero_point.\n");
-      return kTfLiteError;
-    }
-
-    quantization->scale =
-        FlatBufferVectorToTfLiteTypeArray(src_quantization->scale());
-
-    quantization->zero_point->size = channels;
-    int* zero_point_data = quantization->zero_point->data;
-    for (int i = 0; i < channels; i++) {
-      // As a space-saving optimization, zero point arrays for weights can be
-      // reduced to a single value, since all zero points for weights are 0.
-      zero_point_data[i] = src_quantization->zero_point()->size() ==
-                                   src_quantization->scale()->size()
-                               ? src_quantization->zero_point()->Get(i)
-                               : src_quantization->zero_point()->Get(0);
-    }
-    // TODO(rocky): Need to add a micro_allocator test case that fails when
-    // this is not copied:
-    quantization->quantized_dimension = src_quantization->quantized_dimension();
-
-    result->quantization = {kTfLiteAffineQuantization, quantization};
+  quantization->zero_point->size = channels;
+  int* zero_point_data = quantization->zero_point->data;
+  PRINTF("Filling quantization->zero_point data...\r\n");
+  for (int i = 0; i < channels; i++) {
+    zero_point_data[i] = src_quantization->zero_point()->size() ==
+                                 src_quantization->scale()->size()
+                             ? src_quantization->zero_point()->Get(i)
+                             : src_quantization->zero_point()->Get(0);
+    PRINTF("zero_point_data[%d] = %d\r\n", i, zero_point_data[i]);
   }
-  return kTfLiteOk;
+  quantization->quantized_dimension = src_quantization->quantized_dimension();
+  result->quantization = {kTfLiteAffineQuantization, quantization};
+} else {
+  PRINTF("No valid quantization information found.\r\n");
+}
+
+PRINTF("Exiting InitializeTfLiteTensorFromFlatbuffer, returning kTfLiteOk\r\n");
+return kTfLiteOk;
 }
 
 TfLiteStatus InitializeTfLiteEvalTensorFromFlatbuffer(
@@ -703,43 +693,46 @@ void MicroAllocator::DeallocateTempTfLiteTensor(TfLiteTensor* tensor) {
 }
 
 TfLiteTensor* MicroAllocator::AllocateTempTfLiteTensor(
-    const Model* model, const SubgraphAllocations* subgraph_allocations,
-    int tensor_index, int subgraph_index) {
-  const SubGraph* subgraph = model->subgraphs()->Get(subgraph_index);
-  TFLITE_DCHECK(subgraph != nullptr);
+  const Model* model, const SubgraphAllocations* subgraph_allocations,
+  int tensor_index, int subgraph_index) {
+PRINTF("Entering MicroAllocator::AllocateTempTfLiteTensor, tensor_index: %d, subgraph_index: %d\r\n",
+       tensor_index, subgraph_index);
 
-  // This value is allocated from temporary arena space. It is guaranteed to be
-  // around for at least the scope of the calling function. Since this struct
-  // allocation takes place in temp space, no need to own or cleanup.
-  TfLiteTensor* tensor = reinterpret_cast<TfLiteTensor*>(
-      non_persistent_buffer_allocator_->AllocateTemp(sizeof(TfLiteTensor),
-                                                     alignof(TfLiteTensor)));
+const SubGraph* subgraph = model->subgraphs()->Get(subgraph_index);
+TFLITE_DCHECK(subgraph != nullptr);
+PRINTF("SubGraph pointer: %p\r\n", subgraph);
 
-  // Populate any fields from the flatbuffer, since this TfLiteTensor struct is
-  // allocated in the temp section of the arena, ensure that additional
-  // allocations also take place in that section of the arena.
-  if (PopulateTfLiteTensorFromFlatbuffer(model, tensor, tensor_index,
-                                         subgraph_index,
-                                         /*allocate_temp=*/true) != kTfLiteOk) {
-    MicroPrintf(
-        "Failed to populate a temp TfLiteTensor struct from flatbuffer data!");
-    return nullptr;
-  }
-
-  if (subgraph_allocations != nullptr) {
-    // Tensor buffers that are allocated at runtime (e.g. non-weight buffers)
-    // and not located in the flatbuffer are stored on the pre-allocated list of
-    // TfLiteEvalTensors structs. These structs are the source of truth, simply
-    // point the corresponding buffer to the new TfLiteTensor data value.
-    tensor->data.data =
-        subgraph_allocations[subgraph_index].tensors[tensor_index].data.data;
-    // TfLiteEvalTensor structs must also be the source of truth for the
-    // TfLiteTensor dims.
-    tensor->dims =
-        subgraph_allocations[subgraph_index].tensors[tensor_index].dims;
-  }
-  return tensor;
+// 分配临时 TfLiteTensor 结构体内存
+TfLiteTensor* tensor = reinterpret_cast<TfLiteTensor*>(
+    non_persistent_buffer_allocator_->AllocateTemp(sizeof(TfLiteTensor),
+                                                   alignof(TfLiteTensor)));
+PRINTF("Allocated temp TfLiteTensor pointer: %p\r\n", tensor);
+if (tensor == nullptr) {
+    PRINTF("Allocation of temp TfLiteTensor failed!\r\n");
 }
+
+// 从 flatbuffer 填充 TfLiteTensor 结构体内容
+if (PopulateTfLiteTensorFromFlatbuffer(model, tensor, tensor_index,
+                                       subgraph_index,
+                                       /*allocate_temp=*/true) != kTfLiteOk) {
+  MicroPrintf("Failed to populate a temp TfLiteTensor struct from flatbuffer data!\r\n");
+  return nullptr;
+}
+PRINTF("Populated TfLiteTensor from flatbuffer successfully.\r\n");
+
+if (subgraph_allocations != nullptr) {
+  PRINTF("subgraph_allocations is not null, copying tensor data.\r\n");
+  tensor->data.data =
+      subgraph_allocations[subgraph_index].tensors[tensor_index].data.data;
+  tensor->dims =
+      subgraph_allocations[subgraph_index].tensors[tensor_index].dims;
+} else {
+  PRINTF("subgraph_allocations is null.\r\n");
+}
+PRINTF("Exiting MicroAllocator::AllocateTempTfLiteTensor, returning tensor: %p\r\n", tensor);
+return tensor;
+}
+
 
 uint8_t* MicroAllocator::AllocateTempBuffer(size_t size, size_t alignment) {
   return non_persistent_buffer_allocator_->AllocateTemp(size, alignment);
@@ -827,6 +820,7 @@ TfLiteTensor* MicroAllocator::AllocatePersistentTfLiteTensorInternal() {
 TfLiteStatus MicroAllocator::PopulateTfLiteTensorFromFlatbuffer(
     const Model* model, TfLiteTensor* tensor, int tensor_index,
     int subgraph_idx, bool allocate_temp) {
+PRINTF("Entering PopulateTfLite\r\n");
   // TODO(b/162311891): This method serves as a stub to ensure quantized
   // allocations in the tail can be recorded. Once the interpreter has APIs for
   // accessing buffers on TfLiteEvalTensor this method can be dropped.

@@ -19,6 +19,7 @@ limitations under the License.
 
 #include "tensorflow/lite/kernels/internal/compatibility.h"
 
+#include "fsl_debug_console.h"
 namespace tflite {
 MicroInterpreterContext::MicroInterpreterContext(MicroAllocator* allocator,
                                                  const Model* model,
@@ -48,12 +49,14 @@ void* MicroInterpreterContext::GetScratchBuffer(int buffer_idx) {
   ScratchBufferHandle* handle = scratch_buffer_handles_ + buffer_idx;
   return handle->data;
 }
-
 TfLiteTensor* MicroInterpreterContext::AllocateTempTfLiteTensor(
-    int tensor_idx) {
-  return allocator_.AllocateTempTfLiteTensor(model_, graph_.GetAllocations(),
-                                             tensor_idx,
-                                             graph_.GetCurrentSubgraphIndex());
+  int tensor_idx) {
+PRINTF("Entering MicroInterpreterContext::AllocateTempTfLiteTensor, tensor_idx: %d\r\n", tensor_idx);
+TfLiteTensor* tensor = allocator_.AllocateTempTfLiteTensor(model_, graph_.GetAllocations(),
+                                           tensor_idx,
+                                           graph_.GetCurrentSubgraphIndex());
+PRINTF("Exiting MicroInterpreterContext::AllocateTempTfLiteTensor, tensor: %p\r\n", tensor);
+return tensor;
 }
 
 void MicroInterpreterContext::DeallocateTempTfLiteTensor(TfLiteTensor* tensor) {
@@ -98,6 +101,8 @@ TfLiteStatus MicroInterpreterContext::set_external_context(
 }
 
 void MicroInterpreterContext::SetInterpreterState(InterpreterState state) {
+  
+  PRINTF("I Run Here in SetInterpreterState\r\n");
   state_ = state;
 }
 

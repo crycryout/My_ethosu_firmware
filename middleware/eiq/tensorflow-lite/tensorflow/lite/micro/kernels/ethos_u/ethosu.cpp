@@ -20,6 +20,7 @@ limitations under the License.
 #include "tensorflow/lite/micro/kernels/kernel_util.h"
 #include "tensorflow/lite/micro/micro_context.h"
 #include "tensorflow/lite/micro/micro_log.h"
+#include "fsl_debug_console.h"
 
 namespace tflite {
 namespace {
@@ -39,24 +40,35 @@ void* Init(TfLiteContext* context, const char* buffer, size_t length) {
 
 TfLiteStatus Prepare(TfLiteContext* context, TfLiteNode* node) {
   TFLITE_DCHECK(context != nullptr);
+  //PRINTF("I Run Here in ethos2.1\r\n");
   TF_LITE_ENSURE(context, node->inputs->size > 0);
+  //PRINTF("I Run Here in ethos2.2\r\n");
   TFLITE_DCHECK(node->user_data != nullptr);
+  //PRINTF("I Run Here in ethos2.3\r\n");
   TF_LITE_ENSURE(context, node->custom_initial_data_size > 0);
-
+  //PRINTF("I Run Here in ethos2.4\r\n");
   OpData* data = static_cast<OpData*>(node->user_data);
+  //PRINTF("I Run Here in ethos2.5\r\n");
   int num_base_addr = node->inputs->size + node->outputs->size;
+  //PRINTF("I Run Here in ethos2.6\r\n");
 
   // Request arrays for the base address pointers and sizes.
   TF_LITE_ENSURE_STATUS(context->RequestScratchBufferInArena(
       context, num_base_addr * sizeof(uint64_t), &data->base_addr_idx));
+  //PRINTF("I Run Here in ethos2.7\r\n");
   TF_LITE_ENSURE_STATUS(context->RequestScratchBufferInArena(
       context, num_base_addr * sizeof(size_t), &data->base_addr_size_idx));
-
+  //PRINTF("I Run Here in ethos2.8\r\n");
   // Get command stream data size.
   MicroContext* micro_context = GetMicroContext(context);
+
+  //PRINTF("I Run Here in ethos2.9\r\n");
   TfLiteTensor* tensor = micro_context->AllocateTempInputTensor(node, 0);
+  //PRINTF("I Run Here in ethos2.10\r\n");
   data->cms_data_size = tensor->bytes;
+  //PRINTF("I Run Here in ethos2.11\r\n");
   micro_context->DeallocateTempTfLiteTensor(tensor);
+  //PRINTF("I Run Here in ethos2.12\r\n");
   return kTfLiteOk;
 }
 

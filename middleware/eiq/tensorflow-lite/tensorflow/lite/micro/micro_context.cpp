@@ -20,6 +20,7 @@ limitations under the License.
 
 #include "tensorflow/lite/micro/micro_common.h"
 #include "tensorflow/lite/micro/micro_log.h"
+#include "fsl_debug_console.h"
 
 namespace tflite {
 namespace {
@@ -38,11 +39,14 @@ int GetTensorIndex(int index, int max_size, const int* tensor_indices) {
 
 TfLiteTensor* MicroContext::AllocateTempInputTensor(const TfLiteNode* node,
                                                     int index) {
+  PRINTF("I Run Here in Tensor1\r\n");
   const int tensor_index =
       GetTensorIndex(index, node->inputs->size, node->inputs->data);
   if (tensor_index < 0) {
+  PRINTF("I Run Here in Tensor2\r\n");
     return nullptr;
   }
+  PRINTF("I Run Here in Tensor3\r\n");
   return AllocateTempTfLiteTensor(tensor_index);
 }
 

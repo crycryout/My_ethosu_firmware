@@ -31,6 +31,7 @@ limitations under the License.
 #include "tensorflow/lite/micro/tflite_bridge/flatbuffer_conversions_bridge.h"
 #include "tensorflow/lite/schema/schema_generated.h"
 #include "tensorflow/lite/schema/schema_utils.h"
+#include "fsl_debug_console.h"
 
 namespace tflite {
 namespace {
@@ -200,6 +201,7 @@ TfLiteStatus MicroInterpreter::PrepareNodeAndRegistrationDataFromFlatbuffer() {
 TfLiteStatus MicroInterpreter::AllocateTensors() {
   SubgraphAllocations* allocations = allocator_.StartModelAllocation(model_);
 
+//    PRINTF("I Run Here in AllocateTensors1\r\n");
   if (allocations == nullptr) {
     MicroPrintf("Failed starting model allocation.\n");
     initialization_status_ = kTfLiteError;
@@ -208,25 +210,32 @@ TfLiteStatus MicroInterpreter::AllocateTensors() {
 
   graph_.SetSubgraphAllocations(allocations);
 
+//    PRINTF("I Run Here in AllocateTensors2\r\n");
   TF_LITE_ENSURE_STATUS(PrepareNodeAndRegistrationDataFromFlatbuffer());
 
   micro_context_.SetInterpreterState(
       MicroInterpreterContext::InterpreterState::kInit);
   TF_LITE_ENSURE_STATUS(graph_.InitSubgraphs());
+//    PRINTF("I Run Here in AllocateTensors3\r\n");
 
   micro_context_.SetInterpreterState(
       MicroInterpreterContext::InterpreterState::kPrepare);
 
+//    PRINTF("I Run Here in AllocateTensors4\r\n");
   TF_LITE_ENSURE_STATUS(graph_.PrepareSubgraphs());
 
+//    PRINTF("I Run Here in AllocateTensors4.1\r\n");
   micro_context_.SetInterpreterState(
       MicroInterpreterContext::InterpreterState::kMemoryPlanning);
+//    PRINTF("I Run Here in AllocateTensors4.2\r\n");
 
   TF_LITE_ENSURE_OK(&context_, allocator_.FinishModelAllocation(
                                    model_, graph_.GetAllocations(),
                                    &scratch_buffer_handles_));
 
+//    PRINTF("I Run Here in AllocateTensors4.3\r\n");
   micro_context_.SetScratchBufferHandles(scratch_buffer_handles_);
+//    PRINTF("I Run Here in AllocateTensors5\r\n");
 
   // TODO(b/162311891): Drop these allocations when the interpreter supports
   // handling buffers from TfLiteEvalTensor.
@@ -240,6 +249,7 @@ TfLiteStatus MicroInterpreter::AllocateTensors() {
         sizeof(TfLiteTensor*) * inputs_size());
     return kTfLiteError;
   }
+//    PRINTF("I Run Here in AllocateTensors6\r\n");
 
   for (size_t i = 0; i < inputs_size(); ++i) {
     input_tensors_[i] = allocator_.AllocatePersistentTfLiteTensor(
@@ -273,6 +283,7 @@ TfLiteStatus MicroInterpreter::AllocateTensors() {
   }
 
   TF_LITE_ENSURE_STATUS(Reset());
+//   PRINTF("I Run Here in AllocateTensors7\r\n");
 
   tensors_allocated_ = true;
   micro_context_.SetInterpreterState(
